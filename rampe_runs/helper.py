@@ -83,6 +83,7 @@ def run_bellhop_case(args):
         rb,z_rb,r_ati,z_ati,
         bot_type,rough,cb,ssb,
         rhob,attnb,NSD,SD,
+        NRD,RD,NRR,RR,
         run_type,num_beam,min_ang,
         max_ang,step,bellhop_dir
     ) = args
@@ -101,7 +102,8 @@ def run_bellhop_case(args):
         rb,z_rb,r_ati,
         z_ati,bot_type,
         rough,cb,ssb,rhob,
-        attnb,NSD,SD,run_type,
+        attnb,NSD,SD,NRD,RD,
+        NRR,RR,run_type,
         num_beam,min_ang,
         max_ang,step
     )
@@ -380,9 +382,10 @@ def rampe_output_reader(t_curr, freq):
     # Create Depth and Range Vectors
     #########################################
     Depth = np.arange(dz, xsize * ndz * dz, ndz * dz)
-    Range = np.arange(ndr * dr,
-                    dr * ndr * (ysize - 1) + ndr * dr,
-                    ndr * dr)
+    # Range = np.arange(ndr * dr,
+    #                 dr * ndr * (ysize - 1) + ndr * dr,
+    #                 ndr * dr)
+    Range = np.linspace(0, rmax, ysize-1)
 
     #########################################
     # Reallocate range exp(ik0r) phase dependence
@@ -413,7 +416,7 @@ def rampe_output_reader(t_curr, freq):
     return Range, Depth, P
 
 
-def bellhop_input_writer(t_curr,freq,nmedia,sspopt,cw,zw,rw,rb,z_rb,r_ati,z_ati,bot_type,rough,cb,ssb,rhob,attnb,NSD,SD,run_type,num_beam,min_ang,max_ang,step):
+def bellhop_input_writer(t_curr,freq,nmedia,sspopt,cw,zw,rw,rb,z_rb,r_ati,z_ati,bot_type,rough,cb,ssb,rhob,attnb,NSD,SD,NRD,RD,NRR,RR,run_type,num_beam,min_ang,max_ang,step):
 
     ###################
     # Create ENV File #
@@ -447,13 +450,13 @@ def bellhop_input_writer(t_curr,freq,nmedia,sspopt,cw,zw,rw,rb,z_rb,r_ati,z_ati,
         fid.write('\n')
 
         # Receiver Depths
-        fid.write(f'{len(zw):.0f}\t\t\t! NRD: Number of receiver depths \n')
-        fid.write(f'{np.min(zw):.1f} {np.max(zw):.1f} /\t\t\t! Receiver depths (m) \n')
+        fid.write(f'{NRD:.0f}\t\t\t! NRD: Number of receiver depths \n')
+        fid.write(' '.join(f'{z:.1f}' for z in RD) + ' /\t\t\t! Receiver depths (m) \n')
         fid.write('\n')
 
         # Receiver Ranges
-        fid.write(f'{len(rb):.0f}\t\t\t! NR: Number of ranges \n')
-        fid.write(f'{np.min(rb/1000):.3f} {np.max(rb/1000):.3f} /\t\t\t! Receiver ranges (m) \n')
+        fid.write(f'{NRR:.0f}\t\t\t! NRR: Number of receiver ranges \n')
+        fid.write(' '.join(f'{r/1000:.1f}' for r in RR) + ' /\t\t\t! Receiver ranges (km) \n')
         fid.write('\n')
 
         # Run Type and Angle Specs
@@ -522,7 +525,85 @@ def bellhop_input_writer(t_curr,freq,nmedia,sspopt,cw,zw,rw,rb,z_rb,r_ati,z_ati,
         fid.write('\n')
 
 
-def bellhop_output_reader(t_curr, freq):
+def bellhop_arr_output_reader(t_curr, freq):
+    # Output File Name
+    bellhop_dir = os.path.join(os.getcwd(), "input_output", "BELLHOP", t_curr.strftime("%Y-%m-%d_%H-%M-%S"), str(freq))
+    filename = os.path.join(bellhop_dir, "bellhop.arr")
+
+    with open(filename, 'r') as f:
+        lines = [line.strip() for line in f if line.strip()]
+
+        idx = 0
+
+        dimension = lines[idx].replace("'", "")
+        idx += 1
+
+        freq = float(lines[idx])
+        idx += 1
+
+        # Source depths
+        vals = lines[idx].split()
+        nsd = int(vals[0])
+        sd = np.array([float(v) for v in vals[1:]])
+        idx += 1
+
+        # Receiver depths
+        vals = lines[idx].split()
+        nrd = int(vals[0])
+        rd = np.array([float(v) for v in vals[1:]])
+        idx += 1
+
+        # Receiver ranges
+        vals = lines[idx].split()
+        nrr = int(vals[0])
+        rr = np.array([float(v) for v in vals[1:]])
+        idx += 1
+
+        # Max Number of Arrivals
+        vals = lines[idx].split()
+        max_arrivals = int(vals[0])
+        idx += 1
+
+        arrivals = []
+
+        for ir in range(nrr):
+
+            for idepth in range(nrd):
+
+                narr = int(lines[idx])
+                idx += 1
+
+                depth_arrivals = []
+
+                for _ in range(narr):
+
+                    vals = lines[idx].split()
+                    idx += 1
+
+                    depth_arrivals.append({
+                        "amp": float(vals[0]),
+                        "phase_deg": float(vals[1]),
+                        "time_s": float(vals[2]),
+                        "imag_time": float(vals[3]),
+                        "src_angle_deg": float(vals[4]),
+                        "rcv_angle_deg": float(vals[5]),
+                        "surface_bounces": int(vals[6]),
+                        "bottom_bounces": int(vals[7])
+                    })
+
+                arrivals.append(depth_arrivals)
+
+    return {
+        "dimension": dimension,
+        "frequency": freq,
+        "source_depths": sd,
+        "receiver_depths": rd,
+        "receiver_ranges": rr,
+        "arrivals": arrivals
+    }
+
+
+def bellhop_ctl_output_reader(t_curr, freq):
     # Output File Name
     bellhop_dir = os.path.join(os.getcwd(), "input_output", "BELLHOP", t_curr.strftime("%Y-%m-%d_%H-%M-%S"), str(freq))
     filename = os.path.join(bellhop_dir, "bellhop.shd")

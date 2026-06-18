@@ -129,7 +129,7 @@ if __name__ == "__main__":
     print("----------------------------------------------------------\n")
     print("Collecting LiveOcean Sound Speed Profiles\n")
     print("----------------------------------------------------------\n")
-    bellhop_dir = os.path.join(os.getcwd(), "models", "bellhop")
+    bellhop_dir = os.path.join(os.getcwd(), "models", "bellhop.exe")
 
     for t in arms_time:
         # Time index for LiveOcean Data

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=rampe_24_3
+#SBATCH --job-name=bellhop_24_3
 #SBATCH --account=stf
 #SBATCH --partition=cpu-g2
 
@@ -12,8 +12,8 @@
 #SBATCH --time=36:00:00
 
 #SBATCH --chdir=/mmfs1/gscratch/stf/jdiam12/Diamond_Hyak
-#SBATCH --output=run_output/RAMPE/rampe_24_3.txt
-#SBATCH --error=run_output/RAMPE/rampe_24_3_error.txt
+#SBATCH --output=run_output/BELLHOP/bellhop_24_3.txt
+#SBATCH --error=run_output/BELLHOP/bellhop_24_3_error.txt
 
 module load conda
 module load gcc/12.3.0
@@ -21,4 +21,4 @@ module load gcc/12.3.0
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate acoustics
 
-python rampe_runs/rampe_24_3.py
+python bellhop_runs/bellhop_24_3.py

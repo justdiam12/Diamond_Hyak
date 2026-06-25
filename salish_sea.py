@@ -1,8 +1,11 @@
 import os
 from matplotlib import patches
+from matplotlib.colors import ListedColormap
 from netCDF4 import Dataset
 import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.animation as animation
+import matplotlib.patches as patches
 from scipy.io import loadmat
 from datetime import datetime, timedelta
 
@@ -10,11 +13,6 @@ class Salish_Sea:
     def __init__(self, ss_dir, bty_file_path=None):
         self.ss_dir = ss_dir
         self.files = np.sort(os.listdir(ss_dir))
-
-        if bty_file_path is not None:
-            self.bty = loadmat(bty_file_path)['bath_map']
-            self.lon_range = loadmat(bty_file_path)['lon_range']
-            self.lat_range = loadmat(bty_file_path)['lat_range']
 
         # Get the NetCDF Variables
         self.var_names = [
@@ -144,7 +142,26 @@ class Salish_Sea:
         self.q2 = q2
         self.q2l = q2l
         self.l = l
-    
+
+        self.z = np.zeros((self.siglay.shape[0], self.siglay.shape[1], self.u.shape[2]))
+
+        # Compute the vertical coordinate (z) based on the bathymetry and water level
+        for d in range(self.z.shape[0]):
+            for p in range(self.z.shape[1]):
+                for t in range(self.z.shape[2]):
+                    self.z[d,p,t] = -self.zeta[p,t] - self.siglay[d,p] * (self.h[p] + self.zeta[p,t])
+
+        if bty_file_path is not None:
+            self.bty = np.flipud(loadmat(bty_file_path)['bath_map']) * -1
+            self.lon_range = loadmat(bty_file_path)['lon_range']
+            self.lat_range = loadmat(bty_file_path)['lat_range']
+            self.lon_min = np.min(self.lon_range)
+            self.lon_max = np.max(self.lon_range)
+            self.lat_min = np.min(self.lat_range)
+            self.lat_max = np.max(self.lat_range)
+            mask = (self.lon >= self.lon_min) & (self.lon <= self.lon_max) & (self.lat >= self.lat_min) & (self.lat <= self.lat_max)
+            mask_c = (self.lonc >= self.lon_min) & (self.lonc <= self.lon_max) & (self.latc >= self.lat_min) & (self.latc <= self.lat_max)
+            
 
     def plot_bty(self, trackline=None, save_path=None):
         # Plot Bathymetry
@@ -210,81 +227,178 @@ class Salish_Sea:
             plt.show()
 
 
-    def plot_currents(self, hour, depth, save_path=None):
+    def plot_current(self, start_t, end_t=None, save_path=None):
 
-        # Check for Bathymetry File
-        if not hasattr(self, 'bty'):
-            raise ValueError("No bathymetry file loaded.")
+        start_t = np.datetime64(start_t)
+        t0 = np.argmin(np.abs(self.time - start_t))
 
-        # --- SURFACE currents ---
-        u = self.u[hour, 0, :]
-        v = self.v[hour, 0, :]
+        # Static Plot for single time
+        if end_t is None:
 
-        plt.figure(figsize=(6, 10))
+            fig, axes = plt.subplots(2, 5, figsize=(24, 10), constrained_layout=True)
+            axes = axes.ravel()
 
-        # Bathymetry
-        plt.imshow(
-            self.bty,
-            extent=[
-                self.lon_range.min(),
-                self.lon_range.max(),
-                self.lat_range.min(),
-                self.lat_range.max()
-            ],
-            origin='lower',
-            aspect='auto',
-            cmap='plasma',
-            clim=(-50, 200)
-        )
+            # Precompute land mask once
+            land = np.ma.masked_where(self.bty >= 0, self.bty)
 
-        plt.colorbar(label='Depth (m)')
+            for k, ax in enumerate(axes):
 
-        # Currents
-        q = plt.quiver(
-            self.lonc,
-            self.latc,
-            u,
-            v,
-            color='k',
-            scale=2,      # adjust until it looks good
-            width=0.005
-        )
+                u = self.u[k, :, t0]
+                v = self.v[k, :, t0]
+                z_layer = self.z[k, :, t0]
 
-        qk = plt.quiverkey(
-            q,
-            X=0.15,
-            Y=0.97,
-            U=0.25,
-            label='0.25 m/s',
-            labelpos='E',
-            coordinates='axes'
-        )
-        ax = plt.gca()
+                sc = ax.scatter(
+                    self.lon,
+                    self.lat,
+                    c=z_layer,
+                    s=5,
+                    cmap='viridis'
+                )
 
-        box = patches.FancyBboxPatch(
-            (0.025, 0.96),   # lower-left corner (in axes coords)
-            0.31,            # width
-            0.02,            # height
-            boxstyle="round,pad=0.01",
-            transform=ax.transAxes,
-            facecolor='white',
-            edgecolor='none',
-            alpha=0.8,
-            zorder=2
-        )
-        ax.add_patch(box)
-        qk.set_zorder(3)
-        plt.xlabel("Longitude")
-        plt.ylabel("Latitude")
-        plt.title(f"Surface Currents (Jan. 28 - 12am)")
+                plt.colorbar(sc, ax=ax, label='Layer Depth (m)')
 
-        plt.xlim(self.lon_range.min(), self.lon_range.max())
-        plt.ylim(self.lat_range.min(), self.lat_range.max())
+                ax.imshow(
+                    land,
+                    extent=[
+                        self.lon_range.min(), self.lon_range.max(),
+                        self.lat_range.min(), self.lat_range.max()
+                    ],
+                    origin='lower',
+                    aspect='auto',
+                    cmap='Blues_r',
+                    vmin=-50,
+                    vmax=0
+                )
 
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path)
-        plt.show()
+                q = ax.quiver(
+                    self.lonc,
+                    self.latc,
+                    u,
+                    v,
+                    color='k',
+                    scale=4,
+                    width=0.003
+                )
+
+                # Quiver key only once
+                if k == 0:
+                    box = patches.FancyBboxPatch(
+                        (0.025, 0.945),
+                        0.31,
+                        0.02,
+                        boxstyle="round,pad=0.01",
+                        transform=ax.transAxes,
+                        facecolor='white',
+                        edgecolor='none',
+                        alpha=0.5,
+                        zorder=2
+                    )
+                    ax.add_patch(box)
+
+                    qk = ax.quiverkey(
+                        q,
+                        X=0.15,
+                        Y=0.95,
+                        U=0.5,
+                        label='0.5 m/s',
+                        labelpos='E',
+                        coordinates='axes'
+                    )
+                    qk.set_zorder(10)
+                    qk.text.set_zorder(11)
+
+                # Titles
+                if k == 0:
+                    ax.set_title("Surface Currents")
+                elif k == 9:
+                    ax.set_title("Bottom Currents")
+                else:
+                    ax.set_title(f"Level {k+1}")
+
+                ax.set_xlim(self.lon_range.min(), self.lon_range.max())
+                ax.set_ylim(self.lat_range.min(), self.lat_range.max())
+
+            fig.suptitle(f"Dabob Bay Currents - {str(self.time[t0])}", fontsize=14)
+
+            if save_path:
+                plt.savefig(save_path, dpi=300, bbox_inches="tight")
+
+            plt.show()
+
+        # Animate over time
+        else:
+            end_t = np.datetime64(end_t)
+            t1 = np.argmin(np.abs(self.time - end_t))
+
+            fig, axes = plt.subplots(2, 5, figsize=(24, 10), constrained_layout=True)
+            axes = axes.ravel()
+
+            land = np.ma.masked_where(self.bty >= 0, self.bty)
+
+            # draw static bathymetry
+            for ax in axes:
+                ax.imshow(
+                    land,
+                    extent=[
+                        self.lon_range.min(), self.lon_range.max(),
+                        self.lat_range.min(), self.lat_range.max()
+                    ],
+                    origin='lower',
+                    aspect='auto',
+                    cmap='Blues_r',
+                    vmin=-50,
+                    vmax=0
+                )
+                ax.set_xlim(self.lon_range.min(), self.lon_range.max())
+                ax.set_ylim(self.lat_range.min(), self.lat_range.max())
+
+            # initial quivers
+            quivers = []
+            for k in range(10):
+                q = axes[k].quiver(
+                    self.lonc,
+                    self.latc,
+                    self.u[k, :, t0],
+                    self.v[k, :, t0],
+                    color='k',
+                    scale=4,
+                    width=0.003
+                )
+                quivers.append(q)
+
+            def update(frame):
+
+                t_idx = t0 + frame
+                current_time = self.time[t_idx]
+
+                for k in range(10):
+                    u = self.u[k, :, t_idx]
+                    v = self.v[k, :, t_idx]
+                    quivers[k].set_UVC(u, v)
+
+                    if k == 0:
+                        axes[k].set_title("Surface Currents")
+                    elif k == 9:
+                        axes[k].set_title("Bottom Currents")
+                    else:
+                        axes[k].set_title(f"Level {k+1}")
+
+                fig.suptitle(f"Dabob Bay Currents - {str(current_time)}", fontsize=14)
+
+                return quivers
+
+            anim = animation.FuncAnimation(
+                fig,
+                update,
+                frames=(t1 - t0),
+                interval=100,
+                blit=False
+            )
+
+            if save_path:
+                anim.save(save_path, dpi=200, fps=8)
+
+            plt.show()
 
 
 # Run the Salish Sea Model
@@ -297,11 +411,15 @@ if __name__ == "__main__":
     trackline = np.array([source_coords[0], receiver_coords[0]])
     bty_save = os.path.join(os.getcwd(), 'save', 'plots', 'bty.png')
 
+    # Time Range
+    start_t = datetime(2020, 1, 21, 0, 0, 0)
+    end_t = datetime(2020, 1, 30, 0, 0, 0)
+
     # Salish Sea Model
     salish_sea = Salish_Sea(ss_dir, bty_file_path=bty_file_path)
 
     # Plot Bathymetry
     salish_sea.plot_bty(trackline=trackline, save_path=bty_save)
 
-    # Plot Currents
-    salish_sea.plot_currents(hour=0, depth=0, save_path=os.path.join(os.getcwd(), 'save', 'plots', '28_surface_curr.png'))
+    # Plot Current
+    salish_sea.plot_current(start_t=start_t, save_path=os.path.join(os.getcwd(), 'save', 'plots', '28_surface_curr.png'))
